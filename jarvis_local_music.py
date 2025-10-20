@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 import os, time, json, random, subprocess
 import numpy as np
-import pvporcupine, pyaudio, sounddevice as sd
+import sounddevice as sd
 from vosk import Model, KaldiRecognizer
 from piper import PiperVoice
 
 # === CONFIG ===
 BASE_DIR = os.path.expanduser('~/jarvis')
 MUSIC_DIR = os.path.expanduser('~/Music')
-WAKE_PATH = os.path.join(BASE_DIR, 'models', 'hey-jarvis.ppn')
 VOSK_PATH = os.path.join(BASE_DIR, 'models', 'vosk-model-small-en-us-0.15')
 VOICE_PATH = os.path.join(BASE_DIR, 'models', 'en_US-libritts_r-medium.onnx')
 
@@ -17,19 +16,15 @@ print("[Jarvis] Booting systems...")
 voice = PiperVoice.load(VOICE_PATH)
 vosk_model = Model(VOSK_PATH)
 recognizer = KaldiRecognizer(vosk_model, 16000)
-porcupine = pvporcupine.create(keyword_paths=[WAKE_PATH])
-pa = pyaudio.PyAudio()
-stream = pa.open(format=pyaudio.paInt16, channels=1, rate=porcupine.sample_rate,
-                 input=True, frames_per_buffer=512)
 
 # === FUNCTIONS ===
 def speak(text):
     print("[Jarvis]:", text)
     voice.speak(text)
 
-def listen_for_command(seconds=5):
-    print("[Jarvis] Listening...")
-    audio = sd.rec(int(seconds * 16000), samplerate=16000, channels=1, dtype='int16')
+def listen_burst(duration=3):
+    """Record a short burst of audio and return recognized text"""
+    audio = sd.rec(int(duration * 16000), samplerate=16000, channels=1, dtype='int16')
     sd.wait()
     recognizer.AcceptWaveform(audio.tobytes())
     result = json.loads(recognizer.Result())
@@ -96,23 +91,18 @@ else:
     greeting = "Good evening"
 
 speak(f"Systems online. {greeting}, sir. Jarvis boot sequence complete.")
-print("[Jarvis] Awaiting wake word...")
+print("[Jarvis] Awaiting commands (say 'Jarvis' to trigger)...")
 
-# === MAIN LOOP ===
+# === MAIN LOOP (burst mode) ===
 try:
     while True:
-        pcm = stream.read(512, exception_on_overflow=False)
-        pcm = np.frombuffer(pcm, dtype=np.int16)
-        result = porcupine.process(pcm)
-        if result >= 0:
+        cmd = listen_burst(duration=3)
+        if "jarvis" in cmd:
             speak("Yes, sir?")
-            cmd = listen_for_command()
+            # Remove the trigger word "jarvis" before processing
+            cmd = cmd.replace("jarvis", "").strip()
             process_command(cmd)
-            print("[Jarvis] Listening for next wake word...")
+        # Short sleep to reduce CPU load
+        time.sleep(0.5)
 except KeyboardInterrupt:
     print("Exiting...")
-finally:
-    stream.stop_stream()
-    stream.close()
-    pa.terminate()
-    porcupine.delete()
